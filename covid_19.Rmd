@@ -12,7 +12,7 @@ library(ggplot2)
 ```
 
 ## Problem
-With COVID-19 case and deaths numbers on the rise, we would like to analyze countries with the smallest and the biggest population.
+With COVID-19 case and deaths numbers on the rise, we would like to analyze countries with the smallest and the largest population.
 
 ## Data Description
 The data used for the analysis is COVID19 dataset from the Johns Hopkins Github site.
