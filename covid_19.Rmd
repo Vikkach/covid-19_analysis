@@ -1,0 +1,274 @@
+---
+title: "COVID-19"
+output: pdf_document
+date: "2024-03-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+```
+
+## Problem
+With COVID-19 case and deaths numbers on the rise, we would like to analyze countries with the smallest and the biggest population.
+
+## Data Description
+The data used for the analysis is COVID19 dataset from the Johns Hopkins Github site.
+
+## Import Data
+The data is initially imported allowing it to be analyzed.
+
+```{r get_jhu_data}
+## Get current data in the four files
+url_in<-"https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+file_names<- c("time_series_covid19_confirmed_US.csv", 
+               "time_series_covid19_confirmed_global.csv", 
+               "time_series_covid19_deaths_US.csv", 
+               "time_series_covid19_deaths_global.csv", 
+               "time_series_covid19_recovered_global.csv")
+urls<-str_c(url_in, file_names)
+uid_lookup_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv"
+```
+
+Read csv and save datasets.
+
+```{r import_data, message=FALSE}
+global_cases_raw<-read_csv(urls[2])
+global_deaths_raw <- read_csv(urls[4])
+US_cases_raw <- read.csv(urls[1])
+US_deaths_raw <- read.csv(urls[3])
+```
+## Tidy Data 
+
+```{r tidy_global_data}
+global_cases <- global_cases_raw %>%
+  select(-c(Lat, Long)) %>%
+  pivot_longer(cols = -c('Province/State',
+                         'Country/Region'), 
+               names_to = "date",
+               values_to = "cases")
+
+global_deaths <- global_deaths_raw %>%
+  select(-c(Lat, Long)) %>%
+  pivot_longer(cols = -c('Province/State',
+                         'Country/Region'), 
+               names_to = "date",
+               values_to = "deaths")
+
+global <- global_cases %>%
+  full_join(global_deaths) %>%
+  rename(Country_Region = 'Country/Region',
+         Province_State = 'Province/State') %>%
+  mutate(date = mdy(date))
+
+global <- global %>% filter(cases > 0)
+
+uid <- read_csv(uid_lookup_url) %>%
+  select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+
+global <- global %>%
+  unite("Combined_Key",
+        c(Province_State, Country_Region),
+        sep = ", ",
+        na.rm = TRUE,
+        remove = FALSE)
+global <- global%>%
+  left_join(uid, by = c("Province_State", "Country_Region")) %>%
+  select(-c(UID, FIPS)) %>%
+  select(Province_State, Country_Region, date, 
+         cases, deaths, Population, 
+         Combined_Key)
+
+head(global)
+```
+```{r tidy_US_data}
+US_cases <- US_cases_raw %>%
+  pivot_longer(cols = -c('UID':'Combined_Key'),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(gsub("X", "", date))) %>%
+  select(-c(Lat, Long_))
+
+US_deaths <- US_deaths_raw %>%
+  pivot_longer(cols = -(UID:Population),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(Admin2:deaths) %>%
+  mutate(date = mdy(gsub("X", "", date))) %>%
+  select(-c(Lat, Long_))
+
+US<- US_cases %>%
+  full_join(US_deaths)
+
+tail(US)
+```
+I would like to analyze cases and deaths in different countries, so let's sum total population of each country, find percentage of cases and deaths per population.
+
+```{r global_sum}
+global_sum <- global %>%
+  filter(Population > 0) %>%
+  group_by(Country_Region, date) %>%
+  summarise(Total_Population = sum(Population), Total_Cases = sum(cases), Total_Deaths = sum(deaths)) %>%
+  mutate(Pers_Cases_of_Pop = Total_Cases*100/Total_Population, Pers_Deaths_of_Pop = Total_Deaths*100/Total_Population,)
+
+head(global_sum)
+```
+Find country with the smallest population.
+
+```{r get_min_population}
+min_population <- global_sum[global_sum$Total_Population == min(global_sum$Total_Population),] 
+min_population
+```
+The result is **Holy See**.
+
+Find country with the largest population.
+
+```{r get_max_population}
+max_population <- global_sum[global_sum$Total_Population == max(global_sum$Total_Population),]
+max_population
+```
+
+The result is **China**.
+
+## Visualization
+
+Visualize how COVID-19 was going in Holy See (Vatican City).
+
+Given the small size of Holy See, it might be challenging to analyze COVID-19 cases and deaths using a logarithmic scale. Logarithmic scales are effective for visualizing trends when dealing with large datasets. So I will use raw data to visualize.
+
+```{r vis_min_pop}
+ggplot(min_population, aes(x=date, y=Pers_Cases_of_Pop)) +
+  geom_point(aes(color = "Incidence rate")) +
+  geom_point(aes(y = Pers_Deaths_of_Pop, color = "Mortality Rate")) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "COVID-19 in Holy See", y = NULL)
+```
+
+The small population size of Holy See makes it difficult to draw statistically significant conclusions from a limited number of cases.
+Strict measures implemented by the Holy See, including early lockdowns and vaccinations for the Pope and top officials, likely contributed to the low number of cases. And as we can see, there are no deaths were detected because of COVID-19 virus.
+
+Visualize how COVID-19 was going in China.
+
+Analyzing COVID-19 cases and deaths in China on a logarithmic scale can reveal trends in the spread of the virus that might be obscured when looking at raw numbers. 
+
+```{r vis_max_pop}
+ggplot(max_population, aes(x=date, y=Pers_Cases_of_Pop)) +
+  geom_point(aes(color = "Incidence rate")) +
+  geom_point(aes(y = Pers_Deaths_of_Pop, color = "Mortality Rate")) +
+  scale_y_log10() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "COVID19 in China in log scale", y = NULL)
+```
+```{r vis_max_pop_2022}
+
+max_population_2022 <- max_population %>%
+  filter(date > "2022-01-01", date < "2022-05-01")
+
+ggplot(max_population_2022, aes(x=date, y=Pers_Cases_of_Pop)) +
+  geom_point(aes(color = "Incidence rate")) +
+  geom_point(aes(y = Pers_Deaths_of_Pop, color = "Mortality Rate")) +
+  scale_y_log10() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "COVID19 in China in log scale from 2022-01-01 to 2022-05-01", y = NULL)
+```
+```{r vis_max_pop_2023}
+
+max_population_2023 <- max_population %>%
+  filter(date > "2022-10-01")
+
+ggplot(max_population_2023, aes(x=date, y=Pers_Cases_of_Pop)) +
+  geom_point(aes(color = "Incidence rate")) +
+  geom_point(aes(y = Pers_Deaths_of_Pop, color = "Mortality Rate")) +
+  scale_y_log10() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "COVID19 in China in log scale in 2023", y = NULL)
+```
+
+And what we can see.
+
+Trends in Cases:
+
+* Steep rise in cases at the beginning of the outbreak. This indicates exponential growth.
+* We can see a flattening of the curve after lockdown measures are implemented.
+* 2 new peaks in cases indicate subsequent waves of infection.
+
+Trends in Deaths:
+
+* Generally, deaths follow a similar trend to cases, but with a time lag because COVID-19 can take weeks to become fatal in severe cases.
+
+
+## Model
+
+Create a model to explain the deaths per population based on the cases per population, likely using data from the max_population (China) dataset.
+```{r model}
+
+mod <- lm(Pers_Deaths_of_Pop ~ Pers_Cases_of_Pop, data = max_population)
+
+summary(mod)
+```
+Lastly, I will be using my results to make predictions.
+
+```{r model_pred}
+max_population %>% slice_min(Pers_Cases_of_Pop)
+max_population %>% slice_max(Pers_Cases_of_Pop)
+max_pred <- max_population %>% mutate(pred = predict(mod))
+```
+Visualize real data and prediction.
+
+```{r model_vis}
+ggplot(max_pred) +
+  geom_point(aes(x = Pers_Cases_of_Pop, y = Pers_Deaths_of_Pop), color = "blue") +
+  geom_point(aes(x = Pers_Cases_of_Pop, y = pred), color = "red") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "COVID19 in China. Model Results", y = "Mortality Rate", x="Incidence Rate")
+```
+Based on the statistical significance of the coefficients and the high R-squared values, the model seems to fit the data well and suggests a positive association between cases and deaths per population.
+
+
+## Bias
+
+Here's a breakdown of potential biases to consider when analyzing COVID-19 data in Holy See (Vatican City) and China:
+
+Holy See:
+
+**Selection Bias:** Due to the small population size, reported cases might not be representative of the entire population. Testing strategies or limited resources might prioritize certain groups.
+
+**Information Bias:** Limited data availability due to the small scale can make it difficult to get a complete picture.
+
+**Reporting Bias:** There's a possibility of underreporting due to limited testing or asymptomatic cases not being captured.
+
+China:
+
+**Reporting Bias:** Concerns exist about the accuracy of official data reported by the Chinese government. There might be underreporting of cases and deaths.
+
+**Testing Bias:** Testing strategies in China might have changed throughout the pandemic, making comparisons over time difficult.
+
+**Confirmation Bias:** There's a possibility of focusing on data that aligns with the government's narrative and downplaying information that contradicts it.
+
+**Censorship Bias:** Restrictions on information access and media censorship can hinder a complete understanding of the situation.
+
+## Conclusion
+
+Holy See
+
+Due to its small population size, statistically significant conclusions are difficult to draw from the limited number of COVID-19 cases.
+The provided data shows no deaths attributed to COVID-19.
+
+China:
+
+The logarithmic scale reveals trends in cases and deaths that might not be evident in raw data.
+The data suggests:
+
+* A steep rise in cases at the beginning of the outbreak, followed by a flattening due to lockdown measures.
+* Subsequent waves of infection resulting in new peaks in cases.
+* Deaths generally following a similar trend to cases, with a time lag.
+* The linear model indicates a significant positive correlation between cases per population and deaths per population (higher cases lead to a higher number of deaths, with a moderate R-squared value of 0.93).
+
+Predictions:
+
+The prediction model provides an estimated number of deaths per population based on the cases per population. However, it's important to remember that this is just an estimate, and the actual number of deaths could be higher or lower due to various factors not accounted for in the model.
+
+While the analysis provides insights into COVID-19 trends in Holy See and China, it's crucial to consider the limitations and potential biases present in the data and the model. Further analysis with more comprehensive data and addressing potential biases could provide a more accurate understanding of the situation.
